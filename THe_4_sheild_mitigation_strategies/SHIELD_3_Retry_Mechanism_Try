@@ -1,0 +1,37 @@
+import time
+from kafka import KafkaConsumer, KafkaProducer
+
+consumer = KafkaConsumer('orders')
+dlq_producer = KafkaProducer()
+
+MAX_RETRIES = 3
+BASE_BACKOFF = 2  # seconds
+
+for message in consumer:
+    retry_count = 0
+    success = False
+    
+    while retry_count < MAX_RETRIES and not success:
+        try:
+            # Try to process
+            process_order(message.value)
+            success = True
+            print(f"✅ Success on attempt {retry_count + 1}")
+            
+        except Exception as e:
+            retry_count += 1
+            
+            if retry_count < MAX_RETRIES:
+                # Calculate wait time (exponential backoff)
+                wait_time = BASE_BACKOFF ** retry_count
+                
+                print(f"⚠️ Attempt {retry_count} failed!")
+                print(f"⏱️ Waiting {wait_time} seconds...")
+                
+                time.sleep(wait_time)
+            else:
+                # All retries failed! Send to DLQ
+                print(f"💀 All {MAX_RETRIES} attempts failed!")
+                print(f"📮 Sending to DLQ...")
+                
+                dlq_producer.send('dead-letter-queue', value=message.value)
